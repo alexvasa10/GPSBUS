@@ -1,8 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { VehicleSpecs, RoutePlanResponse, Location, RouteOptions, RouteOption } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
 // Helper para validar números estrictamente
 const isValidNumber = (num: any): boolean => {
   return typeof num === 'number' && !isNaN(num) && isFinite(num);
@@ -81,6 +79,9 @@ export const planBusRoute = async (
   options: RouteOptions,
   userLocation?: Location
 ): Promise<RoutePlanResponse> => {
+  // Inicialización segura del cliente AI dentro de la función para evitar errores en tiempo de carga
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  
   // Using a stable model alias suitable for tools
   const modelId = "gemini-2.0-flash-exp"; 
 
