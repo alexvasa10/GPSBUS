@@ -1,5 +1,8 @@
+
 import React, { useState, useEffect } from 'react';
 import { RouteOptions, Location } from '../types';
+import AutocompleteInput from './AutocompleteInput';
+import { PlaceSuggestion } from '../services/placeService';
 
 interface Props {
   onPlan: (origin: string, destination: string, options: RouteOptions) => void;
@@ -48,54 +51,54 @@ const RouteInput: React.FC<Props> = ({ onPlan, isLoading, onLocationUpdate }) =>
     }
   };
 
+  // Optional: If we wanted to pass exact coordinates to the parent, we could handle 
+  // onLocationSelect here, but the current planBusRoute uses string addresses 
+  // + userLocation override. For now, text selection is sufficient for Gemini.
+  const handleOriginSelect = (place: PlaceSuggestion) => {
+      setUseCurrentLoc(false);
+      // We could store the lat/lon if we wanted precise routing start point 
+      // without relying on Gemini to geocode it again.
+  };
+
   return (
     <div className="w-full max-w-md mx-auto bg-white p-6 rounded-3xl shadow-[0_10px_40px_-10px_rgba(0,0,0,0.1)] border border-gray-100 animate-slide-up">
       <form onSubmit={handleSubmit} className="space-y-4">
-        {/* Origin Input */}
-        <div className="relative group">
-          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-            <div className="h-3 w-3 rounded-full bg-blue-400 ring-4 ring-blue-50"></div>
-          </div>
-          <input
-            type="text"
-            placeholder="¿De dónde sales?"
-            value={origin}
-            onChange={(e) => {
-              setOrigin(e.target.value);
-              setUseCurrentLoc(false);
-            }}
-            className="w-full bg-gray-50 hover:bg-gray-100 border-none rounded-2xl py-4 pl-12 pr-12 text-gray-800 font-semibold focus:ring-2 focus:ring-blue-400 transition-all placeholder-gray-400"
-          />
-          <button 
-            type="button"
-            onClick={handleGeolocation}
-            className="absolute inset-y-0 right-0 pr-4 flex items-center text-blue-400 hover:text-blue-600 transition-colors"
-            title="Usar mi ubicación"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
-            </svg>
-          </button>
-        </div>
+        {/* Origin Input with Autocomplete */}
+        <AutocompleteInput 
+          value={origin}
+          onChange={(val) => {
+            setOrigin(val);
+            if (val !== "Mi ubicación actual") setUseCurrentLoc(false);
+          }}
+          placeholder="¿De dónde sales?"
+          iconColor="blue"
+          onLocationSelect={handleOriginSelect}
+          rightElement={
+            <button 
+              type="button"
+              onClick={handleGeolocation}
+              className="text-blue-400 hover:text-blue-600 transition-colors p-2"
+              title="Usar mi ubicación"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
+              </svg>
+            </button>
+          }
+        />
 
         {/* Connector Line */}
-        <div className="pl-5 -my-2">
+        <div className="pl-5 -my-2 relative z-0">
            <div className="h-6 w-0.5 bg-gray-200"></div>
         </div>
 
-        {/* Destination Input */}
-        <div className="relative">
-          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-             <div className="h-3 w-3 rounded-full bg-pink-500 ring-4 ring-pink-50"></div>
-          </div>
-          <input
-            type="text"
-            placeholder="¿A dónde vas?"
-            value={destination}
-            onChange={(e) => setDestination(e.target.value)}
-            className="w-full bg-gray-50 hover:bg-gray-100 border-none rounded-2xl py-4 pl-12 pr-4 text-gray-800 font-semibold focus:ring-2 focus:ring-pink-400 transition-all placeholder-gray-400"
-          />
-        </div>
+        {/* Destination Input with Autocomplete */}
+        <AutocompleteInput 
+          value={destination}
+          onChange={setDestination}
+          placeholder="¿A dónde vas?"
+          iconColor="pink"
+        />
 
         {/* Options */}
         <div className="bg-white pt-2 pb-2">

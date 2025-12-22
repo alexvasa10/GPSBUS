@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { RouteOption, ManeuverType } from '../types';
 import { MapContainer, TileLayer, Marker, Polyline, useMap } from 'react-leaflet';
@@ -56,6 +57,18 @@ const getBearing = (lat1: number, lng1: number, lat2: number, lng2: number) => {
             Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
   const θ = Math.atan2(y, x);
   return (toDeg(θ) + 360) % 360;
+};
+
+// Formatter for distance (e.g. 13415 -> 13.4)
+const formatDistanceValue = (meters: number) => {
+  if (meters >= 1000) return (meters / 1000).toFixed(1);
+  return Math.round(meters).toString();
+};
+
+// Formatter for unit (e.g. km or m)
+const formatDistanceUnit = (meters: number) => {
+  if (meters >= 1000) return 'km';
+  return 'm';
 };
 
 // --- AUDIO ENGINE (TTS) ---
@@ -454,8 +467,11 @@ const RouteResult: React.FC<Props> = ({ route, onReset }) => {
     setGpsMode(mode);
     setIsDriving(true);
     setGpsAccuracy(null);
-    if (steps.length > 0) {
-      speak(`Iniciando ruta. ${steps[0].instruction}`);
+    // Initial instruction based on next step if available
+    if (steps.length > 1) {
+        speak(`Iniciando ruta. ${steps[1].instruction}`);
+    } else if (steps.length > 0) {
+        speak(`Iniciando ruta. ${steps[0].instruction}`);
     }
   };
 
@@ -474,8 +490,28 @@ const RouteResult: React.FC<Props> = ({ route, onReset }) => {
     window.open(url, '_blank');
   };
 
-  const currentStep = steps[stepIndex] || { maneuver: 'start', instruction: 'Calculando...', distance: '' };
+  // Logic to determine Next Event display
+  // Use the NEXT step as the target event unless we are at the end
+  const hasNextStep = stepIndex < steps.length - 1;
+  const targetStep = hasNextStep ? steps[stepIndex + 1] : steps[stepIndex];
   
+  // Distance to display
+  // If driving, use real-time calculated distanceToNext (distance to targetStep start)
+  // If preview, use current segment length (distance to targetStep start)
+  const rawDist = isDriving ? distanceToNext : (
+      // For preview: if we are at Step 0, distance to Step 1 is Step 0's length
+      // steps[stepIndex].distance is usually a string "14 km" or "300 m" from Gemini
+      0 // We will parse string in render
+  );
+  
+  const displayDistValue = isDriving 
+     ? formatDistanceValue(distanceToNext) 
+     : (steps[stepIndex]?.distance?.replace(/[^0-9.,]/g, '').replace(',', '.') || '0');
+     
+  const displayDistUnit = isDriving
+     ? formatDistanceUnit(distanceToNext)
+     : (steps[stepIndex]?.distance?.includes('km') ? 'km' : 'm');
+
   const safePos: [number, number] = useMemo(() => {
      return sanitizeCoordinate(vehiclePos);
   }, [vehiclePos]);
@@ -508,23 +544,23 @@ const RouteResult: React.FC<Props> = ({ route, onReset }) => {
       <div className={`absolute top-0 left-0 right-0 z-20 transition-all duration-500 transform ${isDriving ? 'translate-y-0' : 'translate-y-2'}`}>
          <div className="bg-slate-900 text-white px-5 py-4 rounded-b-3xl shadow-2xl mx-2 flex items-center justify-between min-h-[120px] border-b-4 border-slate-800">
             <div className="bg-yellow-400 text-slate-900 p-3 rounded-2xl shadow-lg mr-4 shrink-0">
-               <ManeuverIcon type={currentStep.maneuver} className="w-12 h-12" />
+               <ManeuverIcon type={targetStep?.maneuver || 'start'} className="w-12 h-12" />
             </div>
 
             <div className="flex-1 overflow-hidden">
                <div className="flex items-baseline space-x-2">
-                 <span className="text-4xl font-black tracking-tighter">{isDriving ? distanceToNext : currentStep.distance}</span>
-                 <span className="text-lg font-bold text-gray-400">{isDriving ? 'm' : ''}</span>
+                 <span className="text-4xl font-black tracking-tighter">{displayDistValue}</span>
+                 <span className="text-lg font-bold text-gray-400">{displayDistUnit}</span>
                </div>
                <div className="text-xl font-bold leading-tight text-white mt-1 truncate">
-                 {currentStep.instruction}
+                 {targetStep?.instruction || "Calculando ruta..."}
                </div>
             </div>
          </div>
 
-         {currentStep.hazardWarning && (
+         {targetStep?.hazardWarning && (
             <div className="mx-4 mt-2 bg-red-600 text-white px-4 py-2 rounded-xl shadow-xl flex items-center justify-center border-2 border-white animate-pulse">
-               <span className="font-black uppercase tracking-wide text-sm">⚠️ {currentStep.hazardWarning}</span>
+               <span className="font-black uppercase tracking-wide text-sm">⚠️ {targetStep.hazardWarning}</span>
             </div>
          )}
       </div>
