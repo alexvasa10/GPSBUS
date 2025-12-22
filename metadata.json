@@ -1,0 +1,7 @@
+{
+  "name": "BusNavi Pro AI",
+  "description": "Asistente de navegación inteligente para autocares y vehículos pesados, impulsado por Gemini y Google Maps para evitar restricciones de altura y peso.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
