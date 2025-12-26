@@ -23,16 +23,15 @@ export interface Coordinates {
   lng: number;
 }
 
-// New Navigation Structures
 export type ManeuverType = 'straight' | 'turn-left' | 'turn-right' | 'slight-left' | 'slight-right' | 'u-turn' | 'roundabout' | 'merge' | 'exit' | 'start' | 'end';
 
 export interface NavigationStep {
   instruction: string;
   distance: string;
   maneuver: ManeuverType;
-  hazardWarning?: string; // Specific warnings for the bus (e.g., "Low bridge 4.0m ahead")
-  start_location?: Coordinates; // Added for Map plotting
-  end_location?: Coordinates;   // Added for Map plotting
+  hazardWarning?: string;
+  start_location?: Coordinates; 
+  end_location?: Coordinates;   
 }
 
 export interface TripSummary {
@@ -40,44 +39,32 @@ export interface TripSummary {
   totalDuration: string;
   trafficCondition: 'fluid' | 'moderate' | 'heavy' | 'accident';
   trafficNote?: string;
-  tollRoads?: boolean; // New
+  tollRoads?: boolean;
 }
 
-// Represents a single route option (Fastest, Scenic, etc.)
 export interface RouteOption {
   id: string;
-  label: string; // e.g., "Más rápida", "Sin peajes"
+  label: string;
   summary: TripSummary;
   steps: NavigationStep[];
-  path: [number, number][]; // High resolution coordinates for the map line
+  path: [number, number][];
   hazards: string[];
   isRecommended?: boolean;
 }
 
 export interface RoutePlanResponse {
-  routes: RouteOption[]; // Now returns an array of options
-  groundingChunks: GroundingChunk[];
+  routes: RouteOption[]; 
+  groundingChunks: any[]; // Relaxed type
 }
 
 export interface GroundingChunk {
-  web?: {
-    uri: string;
-    title: string;
-  };
-  maps?: {
-    uri: string;
-    title: string;
-    placeAnswerSources?: {
-      reviewSnippets?: {
-        text: string;
-      }[];
-    }[];
-  };
+  web?: { uri?: string; title?: string; };
+  maps?: { uri?: string; title?: string; placeAnswerSources?: any; };
 }
 
 export enum AppState {
   VEHICLE_SETUP,
   ROUTE_INPUT,
-  ROUTE_SELECTION, // New State
+  ROUTE_SELECTION,
   NAVIGATION
 }

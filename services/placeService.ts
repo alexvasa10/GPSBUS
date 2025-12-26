@@ -36,3 +36,21 @@ export const searchPlaces = async (query: string): Promise<PlaceSuggestion[]> =>
     return [];
   }
 };
+
+export const reverseGeocode = async (lat: number, lon: number): Promise<PlaceSuggestion | null> => {
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&addressdetails=1&accept-language=es`;
+     const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'BusNaviPro/1.0'
+      }
+    });
+
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.warn("Error reverse geocoding:", error);
+    return null;
+  }
+};

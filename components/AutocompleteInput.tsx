@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect, useRef } from 'react';
-import { searchPlaces, PlaceSuggestion } from '../services/placeService';
+import { searchPlaces, reverseGeocode, PlaceSuggestion } from '../services/placeService';
 
 interface Props {
   value: string;
@@ -8,7 +7,8 @@ interface Props {
   placeholder: string;
   iconColor: string; // 'blue' | 'pink'
   onLocationSelect?: (suggestion: PlaceSuggestion) => void;
-  rightElement?: React.ReactNode; // For the GPS button
+  rightElement?: React.ReactNode; 
+  enableCurrentLocation?: boolean;
 }
 
 const AutocompleteInput: React.FC<Props> = ({ 
@@ -17,7 +17,8 @@ const AutocompleteInput: React.FC<Props> = ({
   placeholder, 
   iconColor,
   onLocationSelect,
-  rightElement 
+  rightElement,
+  enableCurrentLocation = false
 }) => {
   const [suggestions, setSuggestions] = useState<PlaceSuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -70,6 +71,50 @@ const AutocompleteInput: React.FC<Props> = ({
     setShowSuggestions(true);
   };
 
+  const handleCurrentLocationClick = () => {
+    if (!navigator.geolocation) {
+      alert("Tu navegador no soporta geolocalización");
+      return;
+    }
+
+    setIsLoading(true);
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      const { latitude, longitude } = pos.coords;
+      
+      // Intentar obtener dirección legible
+      const place = await reverseGeocode(latitude, longitude);
+      
+      let displayName = "Mi ubicación actual";
+      let suggestion: PlaceSuggestion = {
+        lat: latitude.toString(),
+        lon: longitude.toString(),
+        display_name: displayName,
+        type: 'current_location'
+      };
+
+      if (place) {
+        displayName = place.display_name; // O formatear una más corta
+        suggestion = place;
+      }
+
+      onChange(displayName);
+      if (onLocationSelect) {
+        onLocationSelect(suggestion);
+      }
+      setIsLoading(false);
+      setShowSuggestions(false);
+
+    }, (err) => {
+      console.error("Geolocation error", err);
+      setIsLoading(false);
+      alert("No se pudo obtener la ubicación. Verifica los permisos.");
+    }, {
+      enableHighAccuracy: true,
+      timeout: 5000,
+      maximumAge: 0
+    });
+  };
+
   return (
     <div ref={wrapperRef} className="relative group">
       {/* Icon */}
@@ -87,9 +132,9 @@ const AutocompleteInput: React.FC<Props> = ({
         className={`w-full bg-gray-50 hover:bg-gray-100 border-none rounded-2xl py-4 pl-12 pr-12 text-gray-800 font-semibold focus:ring-2 ${focusRing} transition-all placeholder-gray-400`}
       />
 
-      {/* Loading Indicator (Small spinner inside input) */}
+      {/* Loading Indicator */}
       {isLoading && (
-        <div className="absolute inset-y-0 right-12 flex items-center pr-2 pointer-events-none">
+        <div className="absolute inset-y-0 right-12 flex items-center pr-2 pointer-events-none z-20">
           <svg className="animate-spin h-4 w-4 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
@@ -97,7 +142,21 @@ const AutocompleteInput: React.FC<Props> = ({
         </div>
       )}
 
-      {/* Right Element (GPS Button usually) */}
+      {/* GPS Button */}
+      {enableCurrentLocation && !isLoading && !rightElement && (
+        <button 
+          onClick={handleCurrentLocationClick}
+          type="button"
+          className="absolute inset-y-0 right-0 pr-4 flex items-center z-10 text-gray-400 hover:text-blue-500 transition-colors"
+          title="Usar mi ubicación actual"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
+          </svg>
+        </button>
+      )}
+
+      {/* Right Element (External) */}
       {rightElement && (
         <div className="absolute inset-y-0 right-0 pr-4 flex items-center z-10">
           {rightElement}

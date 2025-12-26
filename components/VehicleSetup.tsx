@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { VehicleSpecs } from '../types';
 
@@ -23,9 +24,14 @@ const VehicleSetup: React.FC<Props> = ({ onSave }) => {
   useEffect(() => {
     const saved = localStorage.getItem('bus_profiles');
     if (saved) {
-      const parsed = JSON.parse(saved);
-      setProfiles(parsed);
-      if (parsed.length === 0) setView('form');
+      try {
+        const parsed = JSON.parse(saved);
+        setProfiles(parsed);
+        if (parsed.length === 0) setView('form');
+      } catch (e) {
+        setProfiles([]);
+        setView('form');
+      }
     } else {
       setView('form');
     }
@@ -50,9 +56,22 @@ const VehicleSetup: React.FC<Props> = ({ onSave }) => {
 
   const handleFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
+    
+    // NAN FIX: If value is empty string, default to 0 or keep as string '0' to avoid NaN
+    let safeValue: string | number = value;
+    
+    if (name !== 'name' && name !== 'cargoType') {
+       if (value === '') {
+         safeValue = 0;
+       } else {
+         const parsed = parseFloat(value);
+         safeValue = isNaN(parsed) ? 0 : parsed;
+       }
+    }
+
     setFormData(prev => ({
       ...prev,
-      [name]: name === 'name' || name === 'cargoType' ? value : parseFloat(value)
+      [name]: safeValue
     }));
   };
 
@@ -162,7 +181,7 @@ const VehicleSetup: React.FC<Props> = ({ onSave }) => {
                 type="number"
                 step="0.1"
                 name="height"
-                value={formData.height}
+                value={formData.height || ''}
                 onChange={handleFormChange}
                 className="w-full bg-gray-50 border-none rounded-2xl py-3 px-4 text-gray-800 font-bold focus:ring-2 focus:ring-blue-400 transition-all"
               />
@@ -173,7 +192,7 @@ const VehicleSetup: React.FC<Props> = ({ onSave }) => {
                 type="number"
                 step="0.1"
                 name="width"
-                value={formData.width}
+                value={formData.width || ''}
                 onChange={handleFormChange}
                 className="w-full bg-gray-50 border-none rounded-2xl py-3 px-4 text-gray-800 font-bold focus:ring-2 focus:ring-blue-400 transition-all"
               />
@@ -187,7 +206,7 @@ const VehicleSetup: React.FC<Props> = ({ onSave }) => {
                 type="number"
                 step="0.5"
                 name="length"
-                value={formData.length}
+                value={formData.length || ''}
                 onChange={handleFormChange}
                 className="w-full bg-gray-50 border-none rounded-2xl py-3 px-4 text-gray-800 font-bold focus:ring-2 focus:ring-blue-400 transition-all"
               />
@@ -198,7 +217,7 @@ const VehicleSetup: React.FC<Props> = ({ onSave }) => {
                 type="number"
                 step="0.5"
                 name="weight"
-                value={formData.weight}
+                value={formData.weight || ''}
                 onChange={handleFormChange}
                 className="w-full bg-gray-50 border-none rounded-2xl py-3 px-4 text-gray-800 font-bold focus:ring-2 focus:ring-blue-400 transition-all"
               />

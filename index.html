@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="es">
   <head>
@@ -72,6 +73,16 @@
         animation: wiggle 0.3s ease-in-out infinite;
       }
     </style>
+    <!-- GLOBAL ERROR HANDLER: El Pararrayos -->
+    <script>
+      window.onerror = function(message, source, lineno, colno, error) {
+        if (message.includes('LatLng') || message.includes('NaN')) {
+          console.warn("Error de mapa interceptado y bloqueado:", message);
+          return true; // Evita que el error rompa la página
+        }
+        return false; 
+      };
+    </script>
   <script type="importmap">
 {
   "imports": {

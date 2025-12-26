@@ -1,51 +1,87 @@
 import { GoogleGenAI } from "@google/genai";
 import { VehicleSpecs, RoutePlanResponse, Location, RouteOptions, RouteOption } from "../types";
 
-// Helper para validar números estrictamente
+// --- VALIDATION HELPERS ---
 const isValidNumber = (num: any): boolean => {
-  return typeof num === 'number' && !isNaN(num) && isFinite(num);
+  return typeof num === 'number' && !isNaN(num) && Number.isFinite(num);
 };
 
-// Helper seguro para parsear coordenadas con fallback y limpieza de strings
+const SAFE_LAT = 40.4168; // Madrid Sol
+const SAFE_LNG = -3.7038;
+
+// Parseo ultra-seguro de coordenadas
 const parseCoordinate = (value: any, fallback: number): number => {
   if (value === null || value === undefined) return fallback;
+  if (Array.isArray(value)) return fallback; // Prevent array erroneously passed
   
-  // Si ya es número y es válido
-  if (typeof value === 'number' && isValidNumber(value)) {
-    return value;
+  if (typeof value === 'number') {
+    return isValidNumber(value) ? value : fallback;
   }
 
-  // Si viene como string, limpiar posibles errores de formato (ej: "40,123" -> "40.123")
   if (typeof value === 'string') {
-     const cleaned = value.replace(',', '.').trim();
-     const parsed = parseFloat(cleaned);
-     if (isValidNumber(parsed)) {
-       return parsed;
+     try {
+       // Elimina todo lo que no sea digito, punto, coma o signo menos
+       const cleaned = value.replace(/[^\d.,-]/g, '').replace(',', '.').trim();
+       if (!cleaned) return fallback;
+       
+       const parsed = parseFloat(cleaned);
+       return isValidNumber(parsed) ? parsed : fallback;
+     } catch (e) {
+       return fallback;
      }
   }
-  
-  // Si no se pudo obtener un número válido, usar fallback
   return fallback;
 };
 
-// Helper para normalizar texto (quitar acentos y minúsculas)
-const normalizeText = (text: string): string => {
-  return text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+// Función para eliminar duplicados exactos consecutivos
+const removeDuplicateCoords = (coords: [number, number][]): [number, number][] => {
+  if (coords.length === 0) return coords;
+  
+  const result: [number, number][] = [coords[0]];
+  
+  for (let i = 1; i < coords.length; i++) {
+    const prev = result[result.length - 1];
+    const curr = coords[i];
+    
+    // Solo agregar si es diferente al anterior (con tolerancia mínima)
+    if (Math.abs(prev[0] - curr[0]) > 0.00001 || Math.abs(prev[1] - curr[1]) > 0.00001) {
+      result.push(curr);
+    }
+  }
+  
+  return result;
 };
 
-// --- OSRM INTEGRATION FOR ROAD GEOMETRY ---
-const fetchRoadGeometry = async (waypoints: {lat: number, lng: number}[]): Promise<[number, number][]> => {
-  if (waypoints.length < 2) return [];
-
-  // OSRM expects {lon},{lat} separated by ;
-  // We limit to roughly 20 waypoints to prevent URL length issues and server load, 
-  // taking key points evenly distributed.
-  const maxWaypoints = 20;
-  let sampling = waypoints;
+// Validación estricta de coordenadas
+const validateAndCleanCoord = (coord: any): [number, number] | null => {
+  if (!Array.isArray(coord) || coord.length < 2) return null;
   
-  if (waypoints.length > maxWaypoints) {
-    const step = Math.ceil(waypoints.length / maxWaypoints);
-    sampling = waypoints.filter((_, i) => i === 0 || i === waypoints.length - 1 || i % step === 0);
+  // Explicit casting to number to avoid any hidden types
+  const lat = Number(coord[0]);
+  const lng = Number(coord[1]);
+  
+  if (!isValidNumber(lat) || !isValidNumber(lng)) return null;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  
+  return [lat, lng];
+};
+
+// --- OSRM SERVICE ---
+const fetchRoadGeometry = async (waypoints: {lat: number, lng: number}[]): Promise<[number, number][]> => {
+  // 1. Filtrado previo estricto
+  const validWaypoints = (waypoints || []).filter(wp => 
+    wp && isValidNumber(wp.lat) && isValidNumber(wp.lng) &&
+    wp.lat >= -90 && wp.lat <= 90 && wp.lng >= -180 && wp.lng <= 180
+  );
+
+  if (validWaypoints.length < 2) return [];
+
+  // 2. Sampling para evitar URLs gigantes
+  const maxWaypoints = 20;
+  let sampling = validWaypoints;
+  if (validWaypoints.length > maxWaypoints) {
+    const step = Math.ceil(validWaypoints.length / maxWaypoints);
+    sampling = validWaypoints.filter((_, i) => i === 0 || i === validWaypoints.length - 1 || i % step === 0);
   }
 
   const coordinatesString = sampling
@@ -59,18 +95,29 @@ const fetchRoadGeometry = async (waypoints: {lat: number, lng: number}[]): Promi
     if (!response.ok) throw new Error("OSRM Failed");
     const data = await response.json();
     
-    if (data.routes && data.routes[0] && data.routes[0].geometry) {
-       // OSRM returns [lon, lat], Leaflet needs [lat, lon]
-       return data.routes[0].geometry.coordinates.map((c: number[]) => [c[1], c[0]]);
+    // 3. Validación de respuesta OSRM
+    if (data.routes?.[0]?.geometry?.coordinates && Array.isArray(data.routes[0].geometry.coordinates)) {
+       const rawCoords = data.routes[0].geometry.coordinates;
+       const cleanCoords: [number, number][] = [];
+       
+       for (const c of rawCoords) {
+         // OSRM devuelve [lon, lat], Leaflet quiere [lat, lon]
+         const validated = validateAndCleanCoord([c[1], c[0]]);
+         if (validated) {
+           cleanCoords.push(validated);
+         }
+       }
+       
+       // Eliminar duplicados consecutivos
+       const deduplicated = removeDuplicateCoords(cleanCoords);
+       return deduplicated.length > 0 ? deduplicated : validWaypoints.map(p => [p.lat, p.lng]);
     }
-    return [];
+    return validWaypoints.map(p => [p.lat, p.lng]);
   } catch (e) {
-    console.warn("Could not fetch road geometry, falling back to straight lines", e);
-    // Fallback: just return the waypoints as the path
-    return waypoints.map(p => [p.lat, p.lng]);
+    console.warn("OSRM fallback:", e);
+    return validWaypoints.map(p => [p.lat, p.lng]);
   }
 };
-
 
 export const planBusRoute = async (
   origin: string,
@@ -79,75 +126,55 @@ export const planBusRoute = async (
   options: RouteOptions,
   userLocation?: Location
 ): Promise<RoutePlanResponse> => {
-  // Inicialización segura del cliente AI dentro de la función para evitar errores en tiempo de carga
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  
-  // Using a stable model alias suitable for tools
   const modelId = "gemini-2.0-flash-exp"; 
 
-  // Instrucción mejorada para rutas escénicas vs eficiencia
-  const scenicInstruction = options.isScenic 
-    ? "MODO TURISMO ACTIVO: Debes generar obligatoriamente una opción etiquetada como 'Ruta Escénica'. Esta ruta debe evitar autopistas monótonas y priorizar carreteras secundarias AMPLIAS y seguras con vistas panorámicas (montaña, costa, bosque) y bajo tráfico. IMPORTANTE: Verifica doblemente las restricciones de altura/peso para no enviar el autobús por pueblos estrechos."
-    : "Modo Estándar: Prioriza la eficiencia, el menor tiempo de llegada y el uso de autopistas principales.";
-
-  // Coordenadas por defecto (Madrid - Puerta del Sol) para fallbacks seguros
-  const DEFAULT_LAT = 40.4168;
-  const DEFAULT_LNG = -3.7038;
-
-  let safeUserLat = DEFAULT_LAT;
-  let safeUserLng = DEFAULT_LNG;
+  // Preparar ubicación de usuario segura
+  let safeUserLat = SAFE_LAT;
+  let safeUserLng = SAFE_LNG;
   let hasUserLocation = false;
 
+  // Paranoid check for user location
   if (userLocation && isValidNumber(userLocation.latitude) && isValidNumber(userLocation.longitude)) {
-    safeUserLat = userLocation.latitude;
-    safeUserLng = userLocation.longitude;
+    safeUserLat = Number(userLocation.latitude);
+    safeUserLng = Number(userLocation.longitude);
     hasUserLocation = true;
   }
 
+  // Injectar coordenadas si el usuario dice "mi ubicación"
   let finalOrigin = origin;
-  const normalizedOrigin = normalizeText(origin);
-  const locationKeywords = ["ubicacion", "location", "posicion", "aqui", "mi zona", "actual"];
-  
-  if (hasUserLocation && locationKeywords.some(kw => normalizedOrigin.includes(kw))) {
-      finalOrigin = `Coordenadas GPS: ${safeUserLat}, ${safeUserLng}`;
+  const normalizedOrigin = origin.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (hasUserLocation && (normalizedOrigin.includes("ubicacion") || normalizedOrigin.includes("aqui"))) {
+      finalOrigin = `${safeUserLat}, ${safeUserLng}`;
   }
 
   const systemInstruction = `
-    Eres un API JSON estricto para un navegador GPS de autobuses profesionales.
-    Tu trabajo es recibir origen/destino y devolver una lista de rutas en formato JSON puro.
+    Eres un API JSON estricto para rutas de autobús.
+    Retorna JSON puro. Sin markdown.
+    Usa Google Maps para validar.
     
-    REGLAS CRÍTICAS DE SEGURIDAD:
-    1. Usa la herramienta Google Maps para validar la existencia de las carreteras.
-    2. IMPORTANTE: El vehículo es PESADO y GRANDE. Evita terminantemente cascos históricos, calles estrechas o giros agudos imposibles para un autobús.
-    3. Si no encuentras rutas específicas para "Autobús", usa rutas de "Coche" pero INCLUYE ALERTAS CRÍTICAS en el array 'hazards' si hay riesgo de altura o peso.
-    
-    FORMATO DE RESPUESTA:
-    1. NUNCA devuelvas texto conversacional. SOLO JSON.
-    2. NUNCA devuelvas una lista de rutas vacía. Si falla la búsqueda exacta, estima una ruta directa viable.
-    3. Si se pide 'Ruta Escénica', una de las opciones debe tener "label": "Ruta Escénica [Descripción]" y priorizar el paisaje sobre el tiempo.
-    
-    ESTRUCTURA JSON OBLIGATORIA:
+    JSON Schema:
     {
       "routes": [
         {
-          "id": "ruta_1",
-          "label": "Nombre corto (ej. Por A-6 o Ruta Escénica Costera)",
+          "id": "string",
+          "label": "string",
           "isRecommended": boolean,
           "summary": {
-            "totalDistance": "ej. 15 km",
-            "totalDuration": "ej. 20 min",
-            "trafficCondition": "fluid" | "moderate" | "heavy",
-            "tollRoads": boolean,
-            "trafficNote": "nota corta de tráfico o paisaje"
+             "totalDistance": "string",
+             "totalDuration": "string",
+             "trafficCondition": "fluid" | "moderate" | "heavy",
+             "tollRoads": boolean,
+             "trafficNote": "string"
           },
-          "hazards": ["Texto alerta"],
+          "hazards": ["string"],
           "steps": [
             {
-              "maneuver": "straight" | "turn-left" | "turn-right" | "roundabout" | "exit" | "start" | "end",
-              "instruction": "Instrucción visual corta",
-              "distance": "distancia del paso",
-              "start_location": { "lat": number, "lng": number },
-              "hazardWarning": "aviso opcional (ej. Puente bajo 4.0m)"
+               "maneuver": "straight" | "turn-left" | "turn-right" | "roundabout" | "exit" | "merge" | "end",
+               "instruction": "string",
+               "distance": "string",
+               "start_location": { "lat": number, "lng": number },
+               "hazardWarning": "string"
             }
           ]
         }
@@ -156,14 +183,10 @@ export const planBusRoute = async (
   `;
 
   const prompt = `
+    Ruta para Autocar ${specs.name} (Al:${specs.height}m, An:${specs.width}m, L:${specs.length}m, P:${specs.weight}t).
     Origen: "${finalOrigin}"
     Destino: "${destination}"
-    Vehículo: ${specs.name} (Alto:${specs.height}m, Ancho:${specs.width}m, Peso:${specs.weight}t).
-    Estrategia de Ruta: ${scenicInstruction}
-    
-    Genera 2 o 3 opciones de ruta variadas.
-    Si es ruta escénica, destaca en 'trafficNote' qué paisaje se ve (ej. "Vistas a la sierra").
-    Asegúrate de incluir coordenadas lat/lng precisas extraídas de Google Maps para cada paso.
+    Modo: ${options.isScenic ? "TURISTICO/ESCENICO" : "RAPIDO/EFICIENTE"}.
   `;
 
   try {
@@ -171,148 +194,147 @@ export const planBusRoute = async (
       model: modelId,
       contents: prompt,
       config: {
-        systemInstruction: systemInstruction,
-        temperature: 0.4, // Reduce creativity to encourage strict JSON
+        systemInstruction,
+        temperature: 0.2,
+        responseMimeType: "application/json",
         tools: [{ googleMaps: {} }],
         ...(hasUserLocation ? {
-            toolConfig: {
-              retrievalConfig: {
-                  latLng: {
-                    latitude: safeUserLat,
-                    longitude: safeUserLng
-                  }
-              }
-            }
+            toolConfig: { retrievalConfig: { latLng: { latitude: safeUserLat, longitude: safeUserLng } } }
         } : {})
       }
     });
 
-    const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+    const groundingChunks = (response.candidates?.[0]?.groundingMetadata?.groundingChunks || []) as any;
     let routes: RouteOption[] = [];
 
     try {
+      // Limpieza de JSON string
       let text = response.text || "{}";
-      // Aggressive cleanup for Markdown blocks
-      text = text.replace(/```json/gi, "").replace(/```/g, "").replace(/code_output/gi, "").trim();
-      
-      // Extract JSON object if embedded in text
+      text = text.replace(/```json/gi, "").replace(/```/g, "").trim();
       const firstBrace = text.indexOf('{');
       const lastBrace = text.lastIndexOf('}');
-      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace >= firstBrace) {
+      if (firstBrace !== -1 && lastBrace !== -1) {
           text = text.substring(firstBrace, lastBrace + 1);
       }
 
-      let parsed: any = {};
-      try {
-        parsed = JSON.parse(text);
-      } catch (parseError) {
-        console.warn("JSON parse failed. Raw text:", text);
-        throw parseError;
-      }
+      const parsed = JSON.parse(text);
+      const rawRoutes = Array.isArray(parsed.routes) ? parsed.routes : [];
+      
+      if (rawRoutes.length === 0) throw new Error("No routes in JSON");
 
-      // Handle cases where model returns array directly or wrapped object
-      const rawRoutes = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.routes) ? parsed.routes : []);
-      
-      if (rawRoutes.length === 0) {
-        throw new Error("No routes found in JSON response");
-      }
-      
-      // Process routes in parallel to fetch geometries
       routes = await Promise.all(rawRoutes.map(async (route: any) => {
           let lastValidLat = safeUserLat;
           let lastValidLng = safeUserLng;
-          
-          const rawSteps = Array.isArray(route.steps) ? route.steps : [];
-          
-          const sanitizedSteps = rawSteps.map((step: any) => {
+
+          const sanitizedSteps = (Array.isArray(route.steps) ? route.steps : []).map((step: any) => {
+              // Safe access to step properties
+              if (!step) return null;
+
               const rawLat = step.start_location?.lat ?? step.start_location?.latitude;
               const rawLng = step.start_location?.lng ?? step.start_location?.longitude;
 
               const lat = parseCoordinate(rawLat, lastValidLat);
               const lng = parseCoordinate(rawLng, lastValidLng);
               
-              lastValidLat = lat;
-              lastValidLng = lng;
+              // Validar rango de coordenadas
+              const validLat = (lat >= -90 && lat <= 90) ? lat : lastValidLat;
+              const validLng = (lng >= -180 && lng <= 180) ? lng : lastValidLng;
+              
+              if (isValidNumber(validLat) && isValidNumber(validLng)) {
+                  lastValidLat = validLat;
+                  lastValidLng = validLng;
+              }
 
               return {
                   ...step,
-                  maneuver: step.maneuver || 'straight', // default maneuver
-                  instruction: step.instruction || "Continúa",
+                  maneuver: step.maneuver || 'straight',
+                  instruction: step.instruction || "",
                   distance: step.distance || "",
-                  start_location: { lat, lng }
+                  start_location: { lat: validLat, lng: validLng }
               };
-          });
+          }).filter(Boolean); // Filter out null steps
 
-          // Ensure start step
+          // Si no hay pasos validos, crear uno dummy
           if (sanitizedSteps.length === 0) {
-            sanitizedSteps.push({
-                maneuver: "start",
-                instruction: "Iniciando ruta...",
-                distance: "0 m",
-                start_location: { lat: safeUserLat, lng: safeUserLng }
-            });
+             sanitizedSteps.push({
+                 maneuver: "start",
+                 instruction: "Inicio",
+                 distance: "0 m",
+                 start_location: { lat: safeUserLat, lng: safeUserLng }
+             });
           }
 
-          // --- FETCH DETAILED GEOMETRY ---
-          // Extract waypoints from steps to query OSRM
+          // Obtener geometria detallada
           const waypoints = sanitizedSteps.map((s: any) => s.start_location);
           let path: [number, number][] = [];
           
           if (waypoints.length >= 2) {
              path = await fetchRoadGeometry(waypoints);
-          } else {
+          }
+          
+          // Si OSRM falló, usar lineas rectas entre pasos
+          if (path.length < 2) {
              path = waypoints.map((p: any) => [p.lat, p.lng]);
           }
 
+          // Validación final del path con limpieza estricta
+          const cleanPath: [number, number][] = [];
+          for (const coord of path) {
+            const validated = validateAndCleanCoord(coord);
+            if (validated) {
+              cleanPath.push(validated);
+            }
+          }
+          
+          // Eliminar duplicados exactos consecutivos
+          const deduplicatedPath = removeDuplicateCoords(cleanPath);
+          
+          // Fallback absoluto si el path está vacío
+          if (deduplicatedPath.length === 0) {
+             deduplicatedPath.push([safeUserLat, safeUserLng]);
+             deduplicatedPath.push([safeUserLat + 0.001, safeUserLng + 0.001]);
+          }
+
           return {
-              id: route.id || `route_${Math.random().toString(36).substr(2, 9)}`,
-              label: route.label || "Ruta Sugerida",
+              id: route.id || Math.random().toString(36),
+              label: route.label || "Ruta",
               isRecommended: !!route.isRecommended,
               summary: {
-                totalDistance: route.summary?.totalDistance || "Calculando...",
-                totalDuration: route.summary?.totalDuration || "Calculando...",
+                totalDistance: route.summary?.totalDistance || "-",
+                totalDuration: route.summary?.totalDuration || "-",
                 trafficCondition: route.summary?.trafficCondition || "fluid",
                 trafficNote: route.summary?.trafficNote,
                 tollRoads: !!route.summary?.tollRoads
               },
               hazards: Array.isArray(route.hazards) ? route.hazards : [],
               steps: sanitizedSteps,
-              path: path
+              path: deduplicatedPath
           };
       }));
 
     } catch (e) {
-      console.warn("Error parsing Gemini response, using fallback.", e);
-      
-      // If prompt contained origin/dest, we can try to make a dummy line
+      console.error("Parsing error", e);
+      // Fallback Route en caso de error de parseo
       routes = [{
         id: "fallback",
-        label: "Ruta Directa (Estimada)",
-        isRecommended: true,
-        summary: { 
-            totalDistance: "Distancia aprox.", 
-            totalDuration: "Tiempo aprox.", 
-            trafficCondition: "moderate",
-            trafficNote: "Ruta generada sin detalles de tráfico"
-        },
+        label: "Ruta Directa (Error)",
+        isRecommended: false,
+        summary: { totalDistance: "?", totalDuration: "?", trafficCondition: "moderate" },
         steps: [{ 
             maneuver: "start", 
-            instruction: `Dirígete hacia el destino. (Detalles no disponibles)`, 
+            instruction: "Error calculando ruta detallada. Dirígete al destino.", 
             distance: "0 m",
             start_location: { lat: safeUserLat, lng: safeUserLng }
         }],
-        path: [[safeUserLat, safeUserLng], [safeUserLat + 0.01, safeUserLng + 0.01]], // Small diagonal line so map doesn't crash
-        hazards: ["Conexión de ruta limitada - Verifica señales"]
+        path: [[safeUserLat, safeUserLng], [safeUserLat + 0.001, safeUserLng + 0.001]],
+        hazards: []
       }];
     }
-    
-    return {
-      routes,
-      groundingChunks
-    };
+
+    return { routes, groundingChunks };
 
   } catch (error) {
-    console.error("Critical error in Gemini Service:", error);
-    throw new Error("No se pudo conectar con el servicio de navegación.");
+    console.error("API Error", error);
+    throw error;
   }
 };

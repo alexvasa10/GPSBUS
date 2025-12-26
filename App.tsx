@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import VehicleSetup from './components/VehicleSetup';
 import RouteInput from './components/RouteInput';
@@ -23,10 +24,13 @@ const App: React.FC = () => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          setUserLocation({
-            latitude: pos.coords.latitude,
-            longitude: pos.coords.longitude
-          });
+          // Strict check for finite numbers
+          if (Number.isFinite(pos.coords.latitude) && Number.isFinite(pos.coords.longitude)) {
+            setUserLocation({
+              latitude: pos.coords.latitude,
+              longitude: pos.coords.longitude
+            });
+          }
         },
         (err) => console.warn("Location permission denied on mount", err)
       );
@@ -34,7 +38,10 @@ const App: React.FC = () => {
   }, []);
 
   const handleLocationUpdate = (loc: Location) => {
-    setUserLocation(loc);
+    // Re-verify before setting state
+    if (Number.isFinite(loc.latitude) && Number.isFinite(loc.longitude)) {
+      setUserLocation(loc);
+    }
   };
 
   const handleVehicleSelect = (selectedSpecs: VehicleSpecs) => {
@@ -78,9 +85,9 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[#f0f4f7] text-gray-800 font-sans">
+    <div className="h-screen flex flex-col bg-[#f0f4f7] text-gray-800 font-sans overflow-hidden">
       {/* Top Bar - Waze Style */}
-      <header className="bg-white shadow-sm sticky top-0 z-50">
+      <header className="bg-white shadow-sm z-50 shrink-0">
         <div className="max-w-4xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center space-x-2">
              <div className="bg-blue-400 p-2 rounded-xl shadow-sm text-white">
@@ -97,33 +104,24 @@ const App: React.FC = () => {
                 className="flex items-center space-x-2 bg-gray-100 px-3 py-1.5 rounded-full cursor-pointer hover:bg-gray-200 transition-colors"
              >
                 <div className="h-2 w-2 rounded-full bg-green-500"></div>
-                <span className="font-bold text-sm text-gray-700">{specs.name}</span>
+                <span className="font-bold text-sm text-gray-700 hidden sm:block">{specs.name}</span>
              </div>
           )}
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="max-w-4xl mx-auto px-4 py-8">
+      {/* Main Content - Flexible based on state */}
+      <main className={`flex-1 relative ${appState === AppState.ROUTE_INPUT ? 'w-full p-0' : 'max-w-4xl mx-auto w-full px-4 py-8 overflow-y-auto'}`}>
         {appState === AppState.VEHICLE_SETUP && (
           <VehicleSetup onSave={handleVehicleSelect} />
         )}
 
         {appState === AppState.ROUTE_INPUT && (
-          <div className="flex flex-col items-center justify-center min-h-[60vh]">
-            <div className="text-center mb-8">
-              <div className="inline-block p-4 bg-blue-100 rounded-full mb-4">
-                 <span className="text-4xl">👋</span>
-              </div>
-              <h2 className="text-3xl font-black text-gray-800 mb-2 waze-font">¿A dónde vamos?</h2>
-              <p className="text-gray-500 font-medium">Evitamos puentes bajos para tu <span className="text-blue-500 font-bold capitalize">{specs?.cargoType}</span></p>
-            </div>
             <RouteInput 
               onPlan={handleRoutePlan} 
               isLoading={loading} 
               onLocationUpdate={handleLocationUpdate}
             />
-          </div>
         )}
 
         {appState === AppState.ROUTE_SELECTION && routePlan && (
@@ -134,13 +132,6 @@ const App: React.FC = () => {
            />
         )}
       </main>
-
-      {/* Footer (Only show if not in selection mode to save space) */}
-      {appState !== AppState.ROUTE_SELECTION && (
-        <footer className="py-6 text-center text-gray-400 text-xs mt-auto">
-          <p>BusWaze AI © 2024</p>
-        </footer>
-      )}
     </div>
   );
 };
