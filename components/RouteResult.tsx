@@ -256,6 +256,7 @@ const RouteResult: React.FC<Props> = ({ route, onReset }) => {
   const [heading, setHeading] = useState(0);
   const [speed, setSpeed] = useState(0);
   const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
+  const lastSafeVehiclePos = useRef<[number, number]>(SAFE_DEFAULT_CENTER);
   
   // Simulation Refs
   const reqRef = useRef<number | null>(null);
@@ -266,6 +267,12 @@ const RouteResult: React.FC<Props> = ({ route, onReset }) => {
   
   // Announcement Refs (Using Set to track multiple announcements per step)
   const announcedRef = useRef<Set<string>>(new Set());
+
+  const setVehiclePosSafe = (coords: any) => {
+    const sanitized = sanitizeCoordinate(coords);
+    lastSafeVehiclePos.current = sanitized;
+    setVehiclePos(sanitized);
+  };
 
   const routePoints = useMemo(() => {
     const points: [number, number][] = [];
@@ -302,7 +309,7 @@ const RouteResult: React.FC<Props> = ({ route, onReset }) => {
 
   useEffect(() => {
     if (routePoints.length > 0 && isSafeCoordinate(routePoints[0])) {
-      setVehiclePos(routePoints[0]);
+      setVehiclePosSafe(routePoints[0]);
     }
   }, [routePoints]);
 
@@ -434,7 +441,7 @@ const RouteResult: React.FC<Props> = ({ route, onReset }) => {
     const newLng = Number(p1[1]) + (Number(p2[1]) - Number(p1[1])) * localT;
 
     if (isSafeNumber(newLat) && isSafeNumber(newLng)) {
-       setVehiclePos([newLat, newLng]);
+       setVehiclePosSafe([newLat, newLng]);
        const newHeading = getBearing(p1[0], p1[1], p2[0], p2[1]);
        if (isSafeNumber(newHeading)) setHeading(newHeading);
        
@@ -458,7 +465,7 @@ const RouteResult: React.FC<Props> = ({ route, onReset }) => {
         setGpsAccuracy(isSafeNumber(accuracy) ? accuracy : null);
         
         if (isSafeNumber(latitude) && isSafeNumber(longitude)) {
-           setVehiclePos([latitude, longitude]);
+           setVehiclePosSafe([latitude, longitude]);
            if (isSafeNumber(gpsHeading)) setHeading(gpsHeading);
            if (isSafeNumber(gpsSpeed)) setSpeed(gpsSpeed * 3.6);
            checkNavigationLogic(latitude, longitude);
