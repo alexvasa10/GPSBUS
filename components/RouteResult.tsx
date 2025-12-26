@@ -23,6 +23,25 @@ const sanitizeCoordinate = (coords: any): [number, number] => {
   return SAFE_DEFAULT_CENTER;
 };
 
+const parseNumeric = (value: any): number | null => {
+  if (typeof value === 'number' && isSafeNumber(value)) return value;
+  if (typeof value === 'string') {
+    const cleaned = Number(value.replace(',', '.'));
+    return isSafeNumber(cleaned) ? cleaned : null;
+  }
+  return null;
+};
+
+const normalizeLatLngPair = (
+  latLike: any,
+  lngLike: any,
+  fallback: [number, number]
+): [number, number] | null => {
+  const lat = parseNumeric(latLike) ?? fallback[0];
+  const lng = parseNumeric(lngLike) ?? fallback[1];
+  return isSafeNumber(lat) && isSafeNumber(lng) ? [lat, lng] as [number, number] : null;
+};
+
 // Distancia exacta entre dos coordenadas (Haversine) - Safe Version
 const getDistance = (lat1: number, lng1: number, lat2: number, lng2: number) => {
   if (!isSafeNumber(lat1) || !isSafeNumber(lng1) || !isSafeNumber(lat2) || !isSafeNumber(lng2)) return 0;
@@ -249,18 +268,34 @@ const RouteResult: React.FC<Props> = ({ route, onReset }) => {
   const announcedRef = useRef<Set<string>>(new Set());
 
   const routePoints = useMemo(() => {
-    let points: [number, number][] = [];
-    if (route.path && route.path.length > 2) {
-      points = route.path.filter(isSafeCoordinate);
-    } else {
-      steps.forEach(s => {
-         const lat = Number(s.start_location?.lat);
-         const lng = Number(s.start_location?.lng);
-         if(isSafeNumber(lat) && isSafeNumber(lng)) {
-             points.push([lat, lng]);
-         }
+    const points: [number, number][] = [];
+    let lastKnown: [number, number] = [...SAFE_DEFAULT_CENTER];
+
+    const pushPoint = (latLike: any, lngLike: any) => {
+      const normalized = normalizeLatLngPair(latLike, lngLike, lastKnown);
+      if (normalized) {
+        lastKnown = normalized;
+        points.push(normalized);
+      }
+    };
+
+    if (Array.isArray(route.path) && route.path.length > 0) {
+      route.path.forEach((coord: any) => {
+        if (Array.isArray(coord)) {
+          pushPoint(coord[0], coord[1]);
+        } else if (coord && typeof coord === 'object') {
+          pushPoint(
+            (coord as any)[0] ?? (coord as any).lat ?? (coord as any).latitude,
+            (coord as any)[1] ?? (coord as any).lng ?? (coord as any).longitude
+          );
+        }
       });
     }
+
+    if (points.length < 2) {
+      steps.forEach(s => pushPoint(s.start_location?.lat, s.start_location?.lng));
+    }
+
     if (points.length === 0) points.push([...SAFE_DEFAULT_CENTER]);
     return points;
   }, [route.path, steps]);
@@ -275,10 +310,10 @@ const RouteResult: React.FC<Props> = ({ route, onReset }) => {
   const checkNavigationLogic = (currentLat: number, currentLng: number) => {
     if (stepIndex < steps.length - 1) {
        const nextStep = steps[stepIndex + 1];
-       const nLat = Number(nextStep.start_location?.lat);
-       const nLng = Number(nextStep.start_location?.lng);
+       const nLat = parseNumeric(nextStep.start_location?.lat);
+       const nLng = parseNumeric(nextStep.start_location?.lng);
        
-       if (isSafeNumber(nLat) && isSafeNumber(nLng)) {
+       if (nLat !== null && nLng !== null) {
           const distMeters = Math.round(getDistance(currentLat, currentLng, nLat, nLng));
           
           if (isSafeNumber(distMeters)) {

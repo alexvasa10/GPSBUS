@@ -28,6 +28,38 @@ const parseCoordinate = (value: any, fallback: number): number => {
   return fallback;
 };
 
+// Garantiza que todas las coordenadas sean números válidos, usando el último
+// valor conocido como respaldo para evitar NaN en el mapa.
+const sanitizePathCoordinates = (
+  coordinates: any[],
+  fallbackLat: number,
+  fallbackLng: number
+): [number, number][] => {
+  let lastLat = fallbackLat;
+  let lastLng = fallbackLng;
+  const sanitized: [number, number][] = [];
+
+  (coordinates || []).forEach((point) => {
+    const rawLat = Array.isArray(point) ? point[0] : point?.lat ?? point?.latitude;
+    const rawLng = Array.isArray(point) ? point[1] : point?.lng ?? point?.longitude;
+
+    const lat = parseCoordinate(rawLat, lastLat);
+    const lng = parseCoordinate(rawLng, lastLng);
+
+    if (isValidNumber(lat) && isValidNumber(lng)) {
+      sanitized.push([lat, lng]);
+      lastLat = lat;
+      lastLng = lng;
+    }
+  });
+
+  if (sanitized.length === 0) {
+    sanitized.push([fallbackLat, fallbackLng]);
+  }
+
+  return sanitized;
+};
+
 // Helper para normalizar texto (quitar acentos y minúsculas)
 const normalizeText = (text: string): string => {
   return text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -258,11 +290,11 @@ export const planBusRoute = async (
           const waypoints = sanitizedSteps.map((s: any) => s.start_location);
           let path: [number, number][] = [];
           
-          if (waypoints.length >= 2) {
-             path = await fetchRoadGeometry(waypoints);
-          } else {
-             path = waypoints.map((p: any) => [p.lat, p.lng]);
-          }
+          const rawGeometry = waypoints.length >= 2 
+            ? await fetchRoadGeometry(waypoints) 
+            : waypoints;
+
+          path = sanitizePathCoordinates(rawGeometry, lastValidLat, lastValidLng);
 
           return {
               id: route.id || `route_${Math.random().toString(36).substr(2, 9)}`,
